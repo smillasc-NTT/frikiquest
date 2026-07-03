@@ -69,6 +69,12 @@ function runMigrations() {
       console.error('Migration error:', err.message);
     }
   });
+  // Add status column if it doesn't exist yet (existing users are auto-approved)
+  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'", (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('Migration error:', err.message);
+    }
+  });
 }
 
 module.exports = db;

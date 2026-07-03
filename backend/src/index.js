@@ -11,6 +11,7 @@ const challengeRoutes = require('./routes/challenges');
 const resultRoutes = require('./routes/results');
 const leaderboardRoutes = require('./routes/leaderboard');
 const userRoutes = require('./routes/users');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use('/api/challenges', challengeRoutes);
 app.use('/api/results', resultRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 
 const publicDir = path.join(__dirname, '../public');
 app.use(express.static(publicDir));

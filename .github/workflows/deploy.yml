@@ -5,9 +5,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://frikiquest-app.azurewebsites.net
     steps:
       - uses: actions/checkout@v4
 
@@ -39,3 +46,17 @@ jobs:
           app-name: frikiquest-app
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: backend
+
+      - name: Smoke test /health
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" https://frikiquest-app.azurewebsites.net/health)
+            if [ "$code" = "200" ]; then
+              echo "Health check OK ($code)"
+              exit 0
+            fi
+            echo "Attempt $i: got $code, retrying in 5s..."
+            sleep 5
+          done
+          echo "Health check failed after retries"
+          exit 1
