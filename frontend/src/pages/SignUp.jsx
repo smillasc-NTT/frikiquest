@@ -32,9 +32,14 @@ export default function SignUp() {
     if (Object.keys(errs).length) { setErrors(errs); return }
     setLoading(true)
     try {
-      await signup(name, email, password)
-      showToast('¡Cuenta creada! Bienvenido.', 'success')
-      navigate('/dashboard')
+      const data = await signup(name, email, password)
+      if (data.pending) {
+        showToast(data.message || 'Cuenta creada. Espera la aprobación de un administrador.', 'success')
+        navigate('/login')
+      } else {
+        showToast('¡Cuenta creada! Bienvenido.', 'success')
+        navigate('/dashboard')
+      }
     } catch (err) {
       showToast(err.message || 'Error al crear cuenta', 'error')
     } finally {

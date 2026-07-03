@@ -7,6 +7,7 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import { challengeService } from '../services/challengeService'
 import { resultService } from '../services/resultService'
+import { adminService } from '../services/adminService'
 
 function toISODate(d) {
   const y = d.getFullYear()
@@ -49,6 +50,15 @@ const typeBadgeClass = { numeric: 'badge-primary', boolean: 'badge-success', tex
 export default function AdminPanel() {
   const { showToast } = useContext(AppContext)
 
+  const [activeTab, setActiveTab] = useState('challenges')
+
+  const [users, setUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(true)
+  const [userFilter, setUserFilter] = useState('all')
+  const [approvingId, setApprovingId] = useState(null)
+  const [deleteUserTarget, setDeleteUserTarget] = useState(null)
+  const [deletingUser, setDeletingUser] = useState(false)
+
   const [challenges, setChallenges] = useState([])
   const [listLoading, setListLoading] = useState(true)
   const [windowStart, setWindowStart] = useState(todayISO())
@@ -81,6 +91,48 @@ export default function AdminPanel() {
   }
 
   useEffect(() => { loadChallenges() }, [])
+
+  const loadUsers = async () => {
+    setUsersLoading(true)
+    try {
+      const data = await adminService.listUsers(userFilter === 'pending' ? 'pending' : undefined)
+      setUsers(data)
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setUsersLoading(false)
+    }
+  }
+
+  useEffect(() => { if (activeTab === 'users') loadUsers() }, [activeTab, userFilter])
+
+  const handleApprove = async (u) => {
+    setApprovingId(u.id)
+    try {
+      await adminService.approveUser(u.id)
+      showToast('Usuario aprobado', 'success')
+      loadUsers()
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteUserTarget) return
+    setDeletingUser(true)
+    try {
+      await adminService.deleteUser(deleteUserTarget.id)
+      showToast('Usuario eliminado', 'success')
+      setDeleteUserTarget(null)
+      loadUsers()
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setDeletingUser(false)
+    }
+  }
 
   const windowEnd = addMonths(windowStart, 1)
   const visibleChallenges = challenges
@@ -204,6 +256,14 @@ export default function AdminPanel() {
     <>
       <Header title="Admin" />
       <div className="page-content">
+        <div style={{ display: 'flex', gap: '8px', marginBottom: 'var(--spacing-md)' }}>
+          <Button variant={activeTab === 'challenges' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('challenges')}>Retos</Button>
+          <Button variant={activeTab === 'users' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('users')}>Usuarios</Button>
+        </div>
+      </div>
+
+      {activeTab === 'challenges' && (
+      <div className="page-content">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 className="page-title" style={{ marginBottom: 0 }}>Retos</h2>
           <Button auto onClick={handleOpenAdd}>+ Añadir reto</Button>
@@ -279,6 +339,56 @@ export default function AdminPanel() {
           </>
         )}
       </div>
+      )}
+
+      {activeTab === 'users' && (
+      <div className="page-content">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="page-title" style={{ marginBottom: 0 }}>Usuarios</h2>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', margin: 'var(--spacing-md) 0' }}>
+          <Button variant={userFilter === 'all' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('all')}>Todos</Button>
+          <Button variant={userFilter === 'pending' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('pending')}>Pendientes</Button>
+        </div>
+
+        {usersLoading ? (
+          <p className="text-muted mt-md">Cargando...</p>
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th>Rol</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.length === 0 ? (
+                  <tr><td colSpan={5} className="admin-table-empty">Sin usuarios</td></tr>
+                ) : users.map(u => (
+                  <tr key={u.id}>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>{u.role}</td>
+                    <td><span className={'badge ' + (u.status === 'pending' ? 'badge-muted' : 'badge-success')}>{u.status === 'pending' ? 'Pendiente' : 'Aprobado'}</span></td>
+                    <td>
+                      {u.status === 'pending' && (
+                        <button className="admin-row-btn" title="Aprobar" disabled={approvingId === u.id} onClick={() => handleApprove(u)}>✓</button>
+                      )}
+                      <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteUserTarget(u)}>🗑</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      )}
 
       <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editingId ? 'Editar reto' : 'Añadir reto'}>
         <form onSubmit={handleSubmit}>
@@ -358,6 +468,16 @@ export default function AdminPanel() {
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button variant="danger" onClick={handleConfirmReset} loading={resetting}>Sí, resetear</Button>
           <Button variant="secondary" onClick={() => setResetTarget(null)} auto>Cancelar</Button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!deleteUserTarget} onClose={() => setDeleteUserTarget(null)} title="Eliminar usuario">
+        <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
+          ¿Seguro que quieres eliminar a "{deleteUserTarget?.name}"? Se borrarán también sus resultados y estadísticas. Esta acción es irreversible.
+        </p>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button variant="danger" onClick={handleConfirmDeleteUser} loading={deletingUser}>Sí, eliminar</Button>
+          <Button variant="secondary" onClick={() => setDeleteUserTarget(null)} auto>Cancelar</Button>
         </div>
       </Modal>
     </>

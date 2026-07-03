@@ -19,11 +19,10 @@ const authController = {
       const passwordHash = await bcrypt.hash(password, 10);
       const userId = helpers.generateId();
 
-      await db.run('INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)', [userId, name, email, passwordHash]);
+      await db.run('INSERT INTO users (id, name, email, password_hash, status) VALUES (?, ?, ?, ?, \'pending\')', [userId, name, email, passwordHash]);
       await db.run('INSERT INTO user_stats (user_id, total_score, results_count) VALUES (?, 0, 0)', [userId]);
 
-      const token = jwt.sign({ sub: userId, name, email, role: 'user' }, config.jwtSecret, { expiresIn: config.jwtExpiry });
-      res.status(201).json({ user: { id: userId, name, email, role: 'user', createdAt: new Date().toISOString() }, token });
+      res.status(201).json({ message: 'Cuenta creada. Un administrador debe aprobar tu acceso antes de que puedas iniciar sesión.', pending: true });
     } catch (err) {
       next(err);
     }
@@ -34,11 +33,15 @@ const authController = {
       const { email, password } = req.body;
       if (!email || !password) return res.status(400).json({ error: 'Missing fields', code: 'VALIDATION_ERROR' });
 
-      const user = await db.get('SELECT id, name, email, password_hash, role FROM users WHERE email = ?', [email]);
+      const user = await db.get('SELECT id, name, email, password_hash, role, status FROM users WHERE email = ?', [email]);
       if (!user) return res.status(401).json({ error: 'Invalid credentials', code: 'INVALID_CREDENTIALS' });
 
       const isValid = await bcrypt.compare(password, user.password_hash);
       if (!isValid) return res.status(401).json({ error: 'Invalid credentials', code: 'INVALID_CREDENTIALS' });
+
+      if (user.status === 'pending') {
+        return res.status(403).json({ error: 'Tu cuenta está pendiente de aprobación por un administrador', code: 'PENDING_APPROVAL' });
+      }
 
       const token = jwt.sign({ sub: user.id, name: user.name, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpiry });
       res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role, createdAt: user.created_at }, token });
