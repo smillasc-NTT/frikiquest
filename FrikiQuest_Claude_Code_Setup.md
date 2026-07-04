@@ -607,6 +607,7 @@ process.on('SIGINT', () => {
 ## Fase 5: Crear Seed Script (datos demo)
 
 ### 5.1 `seed.js`
+> ⚠️ Solo para desarrollo local — no ejecutar `npm run seed` contra producción. Las cuentas y contraseña que crea son de ejemplo, no las reutilices en un entorno real.
 ```javascript
 const db = require('./src/db');
 const bcrypt = require('bcryptjs');
@@ -620,7 +621,7 @@ async function seed() {
     const users = [];
     for (let i = 1; i <= 5; i++) {
       const userId = generateId();
-      const passwordHash = await bcrypt.hash('password123', 10);
+      const passwordHash = await bcrypt.hash('<tu_password_local>', 10);
       await db.run(
         'INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)',
         [userId, `Superfriki ${i}`, `user${i}@test.com`, passwordHash]
@@ -762,7 +763,7 @@ curl -X POST http://localhost:3000/api/auth/signup \
   -d '{
     "name": "Carlos",
     "email": "carlos@test.com",
-    "password": "password123"
+    "password": "<tu_password_local>"
   }'
 ```
 
@@ -780,7 +781,7 @@ curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "carlos@test.com",
-    "password": "password123"
+    "password": "<tu_password_local>"
   }'
 ```
 
