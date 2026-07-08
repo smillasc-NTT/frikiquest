@@ -2,18 +2,23 @@
   "name": "frikiquest-backend",
   "version": "1.0.0",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "node src/index.js",
     "seed": "node seed.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "sqlite3": "^5.1.6",
-    "jsonwebtoken": "^9.0.2",
     "bcryptjs": "^2.4.3",
-    "dotenv": "^16.3.1",
+    "body-parser": "^1.20.2",
     "cors": "^2.8.5",
-    "body-parser": "^1.20.2"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "sqlite3": "^5.1.6"
   }
 }
