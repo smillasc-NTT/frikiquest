@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const helmet = require('helmet');
 const bodyParser = require('body-parser');
 const config = require('./config');
 const db = require('./db');
@@ -16,6 +17,9 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 
 app.use(cors({ origin: config.corsOrigin }));
+// CSP disabled: the built frontend loads Google Fonts and data: URI avatars,
+// which would need careful directive tuning to avoid breaking the app.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 

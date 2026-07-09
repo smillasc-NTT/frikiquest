@@ -734,6 +734,7 @@ process.on('SIGINT', () => {
 ```
 
 ### Backend: seed.js
+> ⚠️ Solo para desarrollo local — no ejecutar `npm run seed` contra producción. Las cuentas y contraseña que crea son de ejemplo, no las reutilices en un entorno real.
 ```javascript
 const db = require('./src/db');
 const bcrypt = require('bcryptjs');
@@ -746,7 +747,7 @@ async function seed() {
     
     for (let i = 1; i <= 5; i++) {
       const userId = generateId();
-      const passwordHash = await bcrypt.hash('password123', 10);
+      const passwordHash = await bcrypt.hash('<tu_password_local>', 10);
       await db.run('INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)', [userId, `Superfriki ${i}`, `user${i}@test.com`, passwordHash]);
       await db.run('INSERT INTO user_stats (user_id, total_score, results_count) VALUES (?, ?, ?)', [userId, Math.floor(Math.random() * 1000), Math.floor(Math.random() * 20)]);
       users.push(userId);
