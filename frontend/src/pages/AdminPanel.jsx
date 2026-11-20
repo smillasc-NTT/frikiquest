@@ -1,13 +1,39 @@
 import { useState, useEffect, useContext } from 'react'
 import { AppContext } from '../context/AppContext'
 import Header from '../components/Header'
-import Card from '../components/Card'
 import Input from '../components/Input'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
-import { challengeService } from '../services/challengeService'
-import { resultService } from '../services/resultService'
+import { eventService } from '../services/eventService'
 import { adminService } from '../services/adminService'
+
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const MAX_IMAGE_SIDE = 1024
+const MAX_DATA_URL_CHARS = 1400000 // backend limit (~1MB image)
+
+/**
+ * Downscales the picked image to at most MAX_IMAGE_SIDE px and re-encodes it
+ * (WebP, JPEG fallback) so big photos don't hit the backend size limit.
+ */
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      let data = canvas.toDataURL('image/webp', 0.85)
+      if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', 0.85)
+      resolve(data)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se ha podido leer la imagen')) }
+    img.src = url
+  })
+}
 
 function toISODate(d) {
   const y = d.getFullYear()
@@ -16,41 +42,54 @@ function toISODate(d) {
   return `${y}-${m}-${day}`
 }
 
-function todayISO() {
-  return toISODate(new Date())
+function formatShort(dateStr) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function addMonths(dateStr, delta) {
+function daysInclusive(start, end) {
+  if (!start || !end || end < start) return 0
+  return Math.round((new Date(end + 'T00:00:00Z') - new Date(start + 'T00:00:00Z')) / 86400000) + 1
+}
+
+// Mirrors helpers.calculateMaxHp on the backend.
+function expectedHp(users, start, end, margin) {
+  const days = daysInclusive(start, end)
+  if (!days || !margin) return 0
+  return Math.max(1, Math.ceil(Math.max(users, 1) * days * 3 * (margin / 100)))
+}
+
+function addDaysISO(dateStr, delta) {
   const d = new Date(dateStr + 'T00:00:00')
-  d.setMonth(d.getMonth() + delta)
+  d.setDate(d.getDate() + delta)
   return toISODate(d)
 }
 
-function formatShort(dateStr) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })
+function findOverlap(events, start, end, excludeId) {
+  return events.find(ev => ev.id !== excludeId && ev.startDate <= end && ev.endDate >= start)
 }
 
-function defaultAvatar(name) {
-  return 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + encodeURIComponent(name || 'hero') + '&backgroundColor=ffc107&backgroundType=solid&clothingColor=ffc107'
+/** Proposes the first free date range (from today, until the end of that month). */
+function emptyForm(events = []) {
+  let start = toISODate(new Date())
+  for (let guard = 0; guard < 50; guard++) {
+    const clash = findOverlap(events, start, start)
+    if (!clash) break
+    start = addDaysISO(clash.endDate, 1)
+  }
+  const s = new Date(start + 'T00:00:00')
+  let end = toISODate(new Date(s.getFullYear(), s.getMonth() + 1, 0))
+  const next = events.filter(ev => ev.startDate > start).sort((a, b) => a.startDate.localeCompare(b.startDate))[0]
+  if (next && next.startDate <= end) end = addDaysISO(next.startDate, -1)
+  return { title: '', description: '', startDate: start, endDate: end, complianceMargin: 70, image: null, imagePreview: null }
 }
 
-const emptyForm = {
-  date: todayISO(),
-  title: '',
-  description: '',
-  criteria: '',
-  type: 'numeric',
-  minValue: '',
-  maxValue: '',
-}
-
-const typeLabels = { numeric: 'Numérico', boolean: 'Sí/No', text: 'Texto libre' }
-const typeBadgeClass = { numeric: 'badge-primary', boolean: 'badge-success', text: 'badge-muted' }
+const statusLabels = { active: 'Activo', upcoming: 'Próximo', finished: 'Terminado' }
+const statusBadge = { active: 'badge-primary', upcoming: 'badge-muted', finished: 'badge-muted' }
 
 export default function AdminPanel() {
   const { showToast } = useContext(AppContext)
 
-  const [activeTab, setActiveTab] = useState('challenges')
+  const [activeTab, setActiveTab] = useState('events')
 
   const [users, setUsers] = useState([])
   const [usersLoading, setUsersLoading] = useState(true)
@@ -59,38 +98,32 @@ export default function AdminPanel() {
   const [deleteUserTarget, setDeleteUserTarget] = useState(null)
   const [deletingUser, setDeletingUser] = useState(false)
 
-  const [challenges, setChallenges] = useState([])
-  const [listLoading, setListLoading] = useState(true)
-  const [windowStart, setWindowStart] = useState(todayISO())
-  const [selectedId, setSelectedId] = useState(null)
+  const [events, setEvents] = useState([])
+  const [approvedUsers, setApprovedUsers] = useState(0)
+  const [eventsLoading, setEventsLoading] = useState(true)
 
   const [showFormModal, setShowFormModal] = useState(false)
-  const [editingId, setEditingId] = useState(null)
-  const [form, setForm] = useState(emptyForm)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm] = useState(() => emptyForm())
+  const [processingImage, setProcessingImage] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
 
-  const [resultsTarget, setResultsTarget] = useState(null)
-  const [results, setResults] = useState([])
-  const [resultsLoading, setResultsLoading] = useState(false)
-
-  const [resetTarget, setResetTarget] = useState(null)
-  const [resetting, setResetting] = useState(false)
-
-  const loadChallenges = async () => {
+  const loadEvents = async () => {
     try {
-      const data = await challengeService.listChallenges()
-      setChallenges(data)
+      const data = await eventService.list()
+      setEvents(data.events)
+      setApprovedUsers(data.approvedUsers)
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
-      setListLoading(false)
+      setEventsLoading(false)
     }
   }
 
-  useEffect(() => { loadChallenges() }, [])
+  useEffect(() => { loadEvents() }, [])
 
   const loadUsers = async () => {
     setUsersLoading(true)
@@ -134,42 +167,50 @@ export default function AdminPanel() {
     }
   }
 
-  const windowEnd = addMonths(windowStart, 1)
-  const visibleChallenges = challenges
-    .filter(c => c.date >= windowStart && c.date < windowEnd)
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const setField = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }))
 
-  const hasOlder = challenges.some(c => c.date < windowStart)
-  const hasNewer = challenges.some(c => c.date >= windowEnd)
-  const selected = challenges.find(c => c.id === selectedId) || null
-
-  const goPrev = () => { setWindowStart(w => addMonths(w, -1)); setSelectedId(null) }
-  const goNext = () => { setWindowStart(w => addMonths(w, 1)); setSelectedId(null) }
-
-  const setField = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+  const handleImage = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!IMAGE_TYPES.includes(file.type)) { showToast('Formato no válido: usa PNG, JPG, WEBP o GIF', 'error'); return }
+    setProcessingImage(true)
+    try {
+      const data = await compressImage(file)
+      if (data.length > MAX_DATA_URL_CHARS) throw new Error('La imagen sigue siendo demasiado grande, prueba con otra')
+      setForm(f => ({ ...f, image: data, imagePreview: data }))
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setProcessingImage(false)
+    }
+  }
 
   const validate = () => {
-    if (!form.date) return 'La fecha es obligatoria'
     if (!form.title.trim()) return 'El título es obligatorio'
     if (!form.description.trim()) return 'La descripción es obligatoria'
-    if (!form.criteria.trim()) return 'El criterio es obligatorio'
-    if (form.type === 'numeric' && form.minValue === '') return 'El valor mínimo es obligatorio para retos numéricos'
+    if (!form.startDate || !form.endDate) return 'Las fechas son obligatorias'
+    if (form.endDate < form.startDate) return 'La fecha de fin debe ser posterior a la de inicio'
+    const m = Number(form.complianceMargin)
+    if (!Number.isInteger(m) || m < 10 || m > 100) return 'El margen debe ser un entero entre 10 y 100'
+    if (!editing && !form.image) return 'La imagen del villano es obligatoria'
+    const clash = findOverlap(events, form.startDate, form.endDate, editing?.id)
+    if (clash) return `Las fechas se solapan con "${clash.title}" (${clash.startDate} → ${clash.endDate}). Elige otras fechas.`
     return null
   }
 
-  const handleOpenAdd = () => { setForm(emptyForm); setEditingId(null); setShowFormModal(true) }
+  const handleOpenAdd = () => { setForm(emptyForm(events)); setEditing(null); setShowFormModal(true) }
 
-  const handleOpenEdit = (c) => {
+  const handleOpenEdit = (ev) => {
     setForm({
-      date: c.date,
-      title: c.title,
-      description: c.description,
-      criteria: c.criteria,
-      type: c.type,
-      minValue: c.minValue ?? '',
-      maxValue: c.maxValue ?? '',
+      title: ev.title,
+      description: ev.description,
+      startDate: ev.startDate,
+      endDate: ev.endDate,
+      complianceMargin: ev.complianceMargin,
+      image: null,
+      imagePreview: eventService.imageSrc(ev),
     })
-    setEditingId(c.id)
+    setEditing(ev)
     setShowFormModal(true)
   }
 
@@ -181,23 +222,22 @@ export default function AdminPanel() {
     setSaving(true)
     try {
       const payload = {
-        date: form.date,
         title: form.title.trim(),
         description: form.description.trim(),
-        criteria: form.criteria.trim(),
-        type: form.type,
-        minValue: form.type === 'numeric' && form.minValue !== '' ? Number(form.minValue) : undefined,
-        maxValue: form.type === 'numeric' && form.maxValue !== '' ? Number(form.maxValue) : undefined,
+        startDate: form.startDate,
+        endDate: form.endDate,
+        complianceMargin: Number(form.complianceMargin),
+        ...(form.image ? { image: form.image } : {}),
       }
-      if (editingId) {
-        await challengeService.updateChallenge(editingId, payload)
-        showToast('Reto actualizado', 'success')
+      if (editing) {
+        await eventService.update(editing.id, payload)
+        showToast('Evento actualizado', 'success')
       } else {
-        await challengeService.createChallenge(payload)
-        showToast('Reto creado con éxito', 'success')
+        await eventService.create(payload)
+        showToast('Evento creado', 'success')
       }
       setShowFormModal(false)
-      loadChallenges()
+      loadEvents()
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -209,11 +249,10 @@ export default function AdminPanel() {
     if (!deleteTarget) return
     setDeleting(true)
     try {
-      await challengeService.deleteChallenge(deleteTarget.id)
-      showToast('Reto eliminado', 'success')
-      if (selectedId === deleteTarget.id) setSelectedId(null)
+      await eventService.remove(deleteTarget.id)
+      showToast('Evento eliminado', 'success')
       setDeleteTarget(null)
-      loadChallenges()
+      loadEvents()
     } catch (err) {
       showToast(err.message, 'error')
     } finally {
@@ -221,122 +260,76 @@ export default function AdminPanel() {
     }
   }
 
-  const handleOpenResults = async (c) => {
-    setResultsTarget(c)
-    setResultsLoading(true)
-    try {
-      const data = await challengeService.getChallengeResults(c.id)
-      setResults(data)
-    } catch (err) {
-      showToast(err.message, 'error')
-    } finally {
-      setResultsLoading(false)
-    }
-  }
-
-  const handleConfirmReset = async () => {
-    if (!resetTarget) return
-    setResetting(true)
-    try {
-      await resultService.deleteResult(resetTarget.id)
-      showToast('Resultado reseteado. El usuario ya puede volver a enviarlo.', 'success')
-      setResetTarget(null)
-      if (resultsTarget) {
-        const data = await challengeService.getChallengeResults(resultsTarget.id)
-        setResults(data)
-      }
-    } catch (err) {
-      showToast(err.message, 'error')
-    } finally {
-      setResetting(false)
-    }
-  }
+  const hpPreview = expectedHp(approvedUsers, form.startDate, form.endDate, Number(form.complianceMargin))
+  const daysPreview = daysInclusive(form.startDate, form.endDate)
 
   return (
     <>
       <Header title="Admin" />
       <div className="page-content">
         <div style={{ display: 'flex', gap: '8px', marginBottom: 'var(--spacing-md)' }}>
-          <Button variant={activeTab === 'challenges' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('challenges')}>Retos</Button>
+          <Button variant={activeTab === 'events' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('events')}>Eventos</Button>
           <Button variant={activeTab === 'users' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('users')}>Usuarios</Button>
         </div>
       </div>
 
-      {activeTab === 'challenges' && (
+      {activeTab === 'events' && (
       <div className="page-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 className="page-title" style={{ marginBottom: 0 }}>Retos</h2>
-          <Button auto onClick={handleOpenAdd}>+ Añadir reto</Button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+          <h2 className="page-title" style={{ marginBottom: 0 }}>Eventos</h2>
+          <Button auto onClick={handleOpenAdd}>+ Nuevo evento</Button>
         </div>
+        <p className="text-muted mt-sm" style={{ fontSize: '13px' }}>
+          Cada hábito cumplido durante el evento quita 1 HP al villano. La vida se calcula como
+          usuarios × días × 3 × margen de cumplimiento.
+        </p>
 
-        {listLoading ? (
+        {eventsLoading ? (
           <p className="text-muted mt-md">Cargando...</p>
         ) : (
-          <>
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Título</th>
-                    <th>Tipo</th>
-                    <th>Acciones</th>
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Evento</th>
+                  <th>Fechas</th>
+                  <th>Vida</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.length === 0 ? (
+                  <tr><td colSpan={5} className="admin-table-empty">Todavía no hay eventos</td></tr>
+                ) : events.map(ev => (
+                  <tr key={ev.id}>
+                    <td>
+                      {ev.imageUrl
+                        ? <img src={eventService.imageSrc(ev)} alt="" className="event-thumb" style={ev.isDefeated ? { filter: 'grayscale(1)' } : undefined} />
+                        : <span className="event-thumb">👹</span>}
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{ev.title}</div>
+                      <span className={'badge ' + statusBadge[ev.status]}>{statusLabels[ev.status]}</span>
+                      {ev.isDefeated && <span className="badge badge-success" style={{ marginLeft: 4 }}>Derrotado</span>}
+                    </td>
+                    <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                      {formatShort(ev.startDate)}<br />{formatShort(ev.endDate)}
+                    </td>
+                    <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                      {ev.hp} / {ev.maxHp} HP ({ev.hpPercent}%)
+                      <div className="event-mini-hp"><div style={{ width: ev.hpPercent + '%' }} /></div>
+                      <span className="text-muted">Margen {ev.complianceMargin}%</span>
+                    </td>
+                    <td>
+                      <button className="admin-row-btn" title="Editar" onClick={() => handleOpenEdit(ev)}>✎</button>
+                      <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteTarget(ev)}>🗑</button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {visibleChallenges.length === 0 ? (
-                    <tr><td colSpan={4} className="admin-table-empty">Sin retos en este periodo</td></tr>
-                  ) : visibleChallenges.map(c => (
-                    <tr
-                      key={c.id}
-                      className={c.id === selectedId ? 'is-selected' : ''}
-                      onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
-                    >
-                      <td>{c.date}</td>
-                      <td>{c.title}</td>
-                      <td><span className={'badge ' + (typeBadgeClass[c.type] || 'badge-muted')}>{typeLabels[c.type] || c.type}</span></td>
-                      <td onClick={e => e.stopPropagation()}>
-                        <button className="admin-row-btn" title="Ver resultados" onClick={() => handleOpenResults(c)}>📊</button>
-                        <button className="admin-row-btn" title="Editar" onClick={() => handleOpenEdit(c)}>✎</button>
-                        <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteTarget(c)}>🗑</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="admin-pagination">
-              {hasOlder ? (
-                <button className="btn btn-ghost btn-auto" onClick={goPrev}>← Anteriores</button>
-              ) : <span />}
-              <span className="admin-pagination-spacer" style={{ textAlign: 'center' }}>
-                {formatShort(windowStart)} – {formatShort(windowEnd)}
-              </span>
-              {hasNewer ? (
-                <button className="btn btn-ghost btn-auto" onClick={goNext}>Siguientes (+1 mes) →</button>
-              ) : <span />}
-            </div>
-
-            {selected && (
-              <div style={{ marginTop: 'var(--spacing-md)' }}>
-                <Card>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <h3>{selected.title}</h3>
-                    <span className={'badge ' + (typeBadgeClass[selected.type] || 'badge-muted')}>{typeLabels[selected.type] || selected.type}</span>
-                  </div>
-                  <p className="text-muted mt-sm" style={{ fontSize: '13px' }}>{selected.date}</p>
-                  <p className="challenge-desc mt-md">{selected.description}</p>
-                  <div className="challenge-criteria">{selected.criteria}</div>
-                  {selected.type === 'numeric' && (
-                    <p className="text-muted" style={{ fontSize: '13px' }}>
-                      Rango: {selected.minValue ?? '—'} {selected.maxValue ? '– ' + selected.maxValue : ''}
-                    </p>
-                  )}
-                </Card>
-              </div>
-            )}
-          </>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       )}
@@ -390,50 +383,53 @@ export default function AdminPanel() {
       </div>
       )}
 
-      <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editingId ? 'Editar reto' : 'Añadir reto'}>
+      <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editing ? 'Editar evento' : 'Nuevo evento'}>
         <form onSubmit={handleSubmit}>
-          <Input type="date" label="Fecha" value={form.date} onChange={setField('date')} required />
-          <Input label="Título" placeholder="Ej: 50 Flexiones" value={form.title} onChange={setField('title')} required />
+          <Input label="Título" placeholder="Ej: El Señor del Sofá" value={form.title} onChange={setField('title')} required />
 
           <div className="input-group">
             <label>Descripción<span style={{ color: 'var(--color-primary)' }}> *</span></label>
             <textarea
               className="input"
               rows={3}
-              placeholder="Describe el reto..."
+              placeholder="Presenta al villano..."
               value={form.description}
               onChange={setField('description')}
             />
           </div>
 
-          <Input label="Criterio" placeholder="Ej: Mínimo 50 repeticiones" value={form.criteria} onChange={setField('criteria')} required />
-
           <div className="input-group">
-            <label>Tipo<span style={{ color: 'var(--color-primary)' }}> *</span></label>
-            <select className="input" value={form.type} onChange={setField('type')}>
-              <option value="numeric">Numérico</option>
-              <option value="boolean">Sí/No</option>
-              <option value="text">Texto libre</option>
-            </select>
+            <label>Imagen del villano{!editing && <span style={{ color: 'var(--color-primary)' }}> *</span>}</label>
+            <input type="file" accept={IMAGE_TYPES.join(',')} onChange={handleImage} className="input" />
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+              PNG, JPG, WEBP o GIF · se redimensiona automáticamente{editing ? ' · déjalo vacío para mantener la actual' : ''}. Mejor con fondo transparente.
+              {processingImage && ' Procesando…'}
+            </span>
+            {form.imagePreview && <img src={form.imagePreview} alt="Vista previa" className="event-image-preview" />}
           </div>
 
-          {form.type === 'numeric' && (
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <Input type="number" label="Valor mínimo" value={form.minValue} onChange={setField('minValue')} required />
-              <Input type="number" label="Valor máximo (opcional)" value={form.maxValue} onChange={setField('maxValue')} />
-            </div>
-          )}
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Input type="date" label="Inicio" value={form.startDate} onChange={setField('startDate')} required />
+            <Input type="date" label="Fin" value={form.endDate} onChange={setField('endDate')} required />
+          </div>
+
+          <Input type="number" label="Margen de cumplimiento (%)" value={form.complianceMargin} onChange={setField('complianceMargin')} required />
+
+          <div className="event-hp-calc">
+            {approvedUsers} usuarios × {daysPreview} días × 3 hábitos × {form.complianceMargin || 0}% = <strong>{hpPreview} HP</strong>
+            {editing && editing.damage > 0 && <> · ya ha recibido {editing.damage} golpes</>}
+          </div>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-            <Button type="submit" loading={saving}>{editingId ? 'Guardar cambios' : 'Crear reto'}</Button>
+            <Button type="submit" loading={saving} disabled={processingImage}>{editing ? 'Guardar cambios' : 'Crear evento'}</Button>
             <Button variant="secondary" onClick={() => setShowFormModal(false)} auto>Cancelar</Button>
           </div>
         </form>
       </Modal>
 
-      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Eliminar reto">
+      <Modal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Eliminar evento">
         <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-          ¿Seguro que quieres eliminar "{deleteTarget?.title}"? Se borrarán también los resultados enviados para este reto y se descontará la puntuación de los usuarios afectados. Esta acción es irreversible.
+          ¿Seguro que quieres eliminar "{deleteTarget?.title}"? Se perderá el daño acumulado del villano. El XP de los usuarios no cambia. Esta acción es irreversible.
         </p>
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button variant="danger" onClick={handleConfirmDelete} loading={deleting}>Sí, eliminar</Button>
@@ -441,39 +437,9 @@ export default function AdminPanel() {
         </div>
       </Modal>
 
-      <Modal isOpen={!!resultsTarget} onClose={() => setResultsTarget(null)} title={'Resultados: ' + (resultsTarget?.title || '')}>
-        {resultsLoading ? (
-          <p className="text-muted">Cargando...</p>
-        ) : results.length === 0 ? (
-          <p className="text-muted">Nadie ha enviado resultado todavía.</p>
-        ) : (
-          <div className="leaderboard-list">
-            {results.map(r => (
-              <div key={r.id} className="leaderboard-row">
-                <img src={r.avatarUrl || defaultAvatar(r.userName)} alt="" className="lb-avatar" />
-                <span className="lb-name">{r.userName}</span>
-                <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>{r.value}</span>
-                <span className="lb-score">{r.score} XP</span>
-                <button className="admin-row-btn" title="Resetear resultado" onClick={() => setResetTarget(r)}>↺</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
-
-      <Modal isOpen={!!resetTarget} onClose={() => setResetTarget(null)} title="Resetear resultado">
-        <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-          ¿Seguro que quieres resetear el resultado de <strong>{resetTarget?.userName}</strong>? Se eliminará su envío, se descontará su puntuación y podrá volver a reportar el resultado.
-        </p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Button variant="danger" onClick={handleConfirmReset} loading={resetting}>Sí, resetear</Button>
-          <Button variant="secondary" onClick={() => setResetTarget(null)} auto>Cancelar</Button>
-        </div>
-      </Modal>
-
       <Modal isOpen={!!deleteUserTarget} onClose={() => setDeleteUserTarget(null)} title="Eliminar usuario">
         <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-          ¿Seguro que quieres eliminar a "{deleteUserTarget?.name}"? Se borrarán también sus resultados y estadísticas. Esta acción es irreversible.
+          ¿Seguro que quieres eliminar a "{deleteUserTarget?.name}"? Se borrarán también sus registros diarios. Esta acción es irreversible.
         </p>
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button variant="danger" onClick={handleConfirmDeleteUser} loading={deletingUser}>Sí, eliminar</Button>

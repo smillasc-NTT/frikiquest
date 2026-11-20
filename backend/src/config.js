@@ -9,6 +9,8 @@ module.exports = {
   databasePath: process.env.DATABASE_PATH || './data/frikiquest.db',
   minPasswordLength: 8,
   maxNameLength: 100,
-  maxTextResultLength: 500,
-  maxNumericValue: 10000,
+  // "Today" for daily logs and events is computed in this time zone.
+  timezone: process.env.APP_TIMEZONE || 'Europe/Madrid',
+  xpPerItem: 10,
+  maxEventImageChars: 1400000, // ~1MB image as base64 data URL
 };

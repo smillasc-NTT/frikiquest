@@ -10,10 +10,7 @@ if (!fs.existsSync(dataDir)) {
 
 const db = new sqlite3.Database(config.databasePath, (err) => {
   if (err) console.error('Error opening database:', err);
-  else {
-    console.log('Connected to SQLite database');
-    initializeSchema();
-  }
+  else console.log('Connected to SQLite database');
 });
 
 const originalRun = db.run.bind(db);
@@ -46,35 +43,48 @@ db.all = function(sql, params = []) {
   });
 };
 
-function initializeSchema() {
-  const schemaPath = path.join(__dirname, 'schema.sql');
-  const schema = fs.readFileSync(schemaPath, 'utf8');
-  db.exec(schema, (err) => {
-    if (err) { console.error('Error initializing schema:', err); return; }
-    console.log('Database schema initialized');
-    runMigrations();
-  });
+function exec(sql) {
+  return new Promise((resolve, reject) => db.exec(sql, (err) => (err ? reject(err) : resolve())));
 }
 
-function runMigrations() {
-  // Add avatar_url column if it doesn't exist yet
-  db.exec("ALTER TABLE users ADD COLUMN avatar_url TEXT", (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.error('Migration error:', err.message);
-    }
-  });
-  // Add role column if it doesn't exist yet
-  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'", (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.error('Migration error:', err.message);
-    }
-  });
-  // Add status column if it doesn't exist yet (existing users are auto-approved)
-  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'", (err) => {
-    if (err && !err.message.includes('duplicate column')) {
-      console.error('Migration error:', err.message);
-    }
-  });
+async function addColumn(sql) {
+  try {
+    await exec(sql);
+  } catch (err) {
+    if (!err.message.includes('duplicate column')) throw err;
+  }
 }
+
+async function initializeSchema() {
+  // v1: replace the daily-challenge model with daily logs + boss events.
+  // Old data is wiped on purpose (everyone starts from 0 XP).
+  const { user_version: version } = await db.get('PRAGMA user_version');
+  if (version < 1) {
+    await exec(`
+      DROP TABLE IF EXISTS results;
+      DROP TABLE IF EXISTS daily_challenges;
+      DROP TABLE IF EXISTS user_stats;
+    `);
+  }
+
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  await exec(schema);
+
+  await addColumn('ALTER TABLE users ADD COLUMN avatar_url TEXT');
+  await addColumn("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+  // Existing users are auto-approved
+  await addColumn("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
+
+  if (version < 1) await exec('PRAGMA user_version = 1');
+  console.log('Database schema initialized');
+}
+
+// Resolves once the schema and migrations have been applied.
+db.ready = new Promise((resolve, reject) => {
+  db.once('open', () => initializeSchema().then(resolve, (err) => {
+    console.error('Error initializing schema:', err);
+    reject(err);
+  }));
+});
 
 module.exports = db;

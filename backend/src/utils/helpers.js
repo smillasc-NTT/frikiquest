@@ -1,38 +1,50 @@
 const crypto = require('crypto');
+const config = require('../config');
+
+// 'YYYY-MM-DD' for a Date in the app time zone (en-CA formats as ISO date).
+const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+// Plain calendar arithmetic on 'YYYY-MM-DD' strings (UTC-based, no DST issues).
+function addDays(dateStr, delta) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().split('T')[0];
+}
+
+function daysBetween(fromStr, toStr) {
+  return Math.round((new Date(toStr + 'T00:00:00Z') - new Date(fromStr + 'T00:00:00Z')) / 86400000);
+}
 
 const helpers = {
   generateId: () => crypto.randomBytes(16).toString('hex').toLowerCase(),
-  calculateScore: (value, type, minValue = null) => {
-    if (type === 'numeric' && minValue) {
-      const ratio = parseInt(value) / minValue;
-      return Math.min(Math.floor(ratio * 100), 100);
-    }
-    if (type === 'boolean') return value === 'true' || value === true ? 100 : 0;
-    if (type === 'text') return 100;
-    return 100;
-  },
-  getTodayDate: () => new Date().toISOString().split('T')[0],
-  getYesterdayDate: () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
-  },
+  getTodayDate: () => dateFormatter.format(new Date()),
+  getYesterdayDate: () => addDays(dateFormatter.format(new Date()), -1),
+  addDays,
+  daysBetween,
+  isValidDate: (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s + 'T00:00:00Z')),
 
-  calculateStreak: (dates) => {
-    // dates: array de strings 'YYYY-MM-DD' ordenados DESC
-    if (!dates || !dates.length) return 0;
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = (() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; })();
-    if (dates[0] !== today && dates[0] !== yesterday) return 0;
-    let streak = 1;
-    for (let i = 1; i < dates.length; i++) {
-      const prev = new Date(dates[i-1]);
-      const curr = new Date(dates[i]);
-      const diff = Math.round((prev - curr) / 86400000);
-      if (diff === 1) streak++;
-      else break;
+  /**
+   * Streak = consecutive days (ending today or yesterday) with at least one
+   * completed item (xp > 0). Today not being done yet doesn't break it.
+   * logs: [{ date, xp }]
+   */
+  calculateStreak: (logs, today = helpers.getTodayDate()) => {
+    const xpByDate = new Map(logs.map(l => [l.date, l.xp]));
+    let day = (xpByDate.get(today) || 0) > 0 ? today : addDays(today, -1);
+    let streak = 0;
+    while (streak < 400 && (xpByDate.get(day) || 0) > 0) {
+      streak++;
+      day = addDays(day, -1);
     }
     return streak;
+  },
+
+  /** Hit points needed to kill the villain: users × days × 3 items × margin. */
+  calculateMaxHp: (users, startDate, endDate, marginPct) => {
+    const days = daysBetween(startDate, endDate) + 1;
+    return Math.max(1, Math.ceil(Math.max(users, 1) * days * 3 * (marginPct / 100)));
   },
 
   getRank: (totalScore) => {
