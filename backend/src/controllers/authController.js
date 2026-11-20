@@ -20,7 +20,6 @@ const authController = {
       const userId = helpers.generateId();
 
       await db.run('INSERT INTO users (id, name, email, password_hash, status) VALUES (?, ?, ?, ?, \'pending\')', [userId, name, email, passwordHash]);
-      await db.run('INSERT INTO user_stats (user_id, total_score, results_count) VALUES (?, 0, 0)', [userId]);
 
       res.status(201).json({ message: 'Cuenta creada. Un administrador debe aprobar tu acceso antes de que puedas iniciar sesión.', pending: true });
     } catch (err) {
@@ -56,16 +55,15 @@ const authController = {
       const user = await db.get('SELECT id, name, email, created_at, avatar_url, role FROM users WHERE id = ?', [userId]);
       if (!user) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
 
-      const stats = await db.get('SELECT total_score, results_count FROM user_stats WHERE user_id = ?', [userId]);
-      const totalScore = stats?.total_score || 0;
+      const totals = await db.get('SELECT COALESCE(SUM(xp), 0) AS total FROM daily_logs WHERE user_id = ?', [userId]);
+      const totalScore = totals.total;
 
-      const resultDates = await db.all(
-        `SELECT DISTINCT c.date FROM results r
-         JOIN daily_challenges c ON r.challenge_id = c.id
-         WHERE r.user_id = ? ORDER BY c.date DESC`,
-        [userId]
+      const today = helpers.getTodayDate();
+      const recentLogs = await db.all(
+        'SELECT date, xp FROM daily_logs WHERE user_id = ? AND date >= ? ORDER BY date DESC',
+        [userId, helpers.addDays(today, -400)]
       );
-      const streak = helpers.calculateStreak(resultDates.map(r => r.date));
+      const streak = helpers.calculateStreak(recentLogs, today);
       const rank = helpers.getRank(totalScore);
 
       res.json({

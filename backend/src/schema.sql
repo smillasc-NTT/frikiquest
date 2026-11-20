@@ -8,41 +8,50 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS daily_challenges (
+-- One row per user and day. Each category is NULL until the user presses its
+-- button ('done'); once marked it cannot be undone.
+CREATE TABLE IF NOT EXISTS daily_logs (
   id TEXT PRIMARY KEY,
-  date DATE UNIQUE NOT NULL,
+  user_id TEXT NOT NULL,
+  date DATE NOT NULL,
+  training TEXT CHECK (training IN ('done')),
+  steps TEXT CHECK (steps IN ('done')),
+  nutrition TEXT CHECK (nutrition IN ('done')),
+  xp INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  UNIQUE (user_id, date)
+);
+
+-- Boss events. The villain has max_hp hit points; every completed daily
+-- item during the event removes one (see event_hits).
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
-  criteria TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('numeric', 'boolean', 'text')),
-  min_value INTEGER,
-  max_value INTEGER,
+  image TEXT,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  compliance_margin INTEGER NOT NULL DEFAULT 70,
+  max_hp INTEGER NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS results (
+-- Hits are kept even if the user is deleted, so the villain doesn't heal.
+CREATE TABLE IF NOT EXISTS event_hits (
   id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
-  challenge_id TEXT NOT NULL,
-  value TEXT NOT NULL,
-  score INTEGER NOT NULL DEFAULT 0,
-  submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  log_date DATE NOT NULL,
+  category TEXT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id),
-  FOREIGN KEY (challenge_id) REFERENCES daily_challenges(id),
-  UNIQUE (user_id, challenge_id)
+  FOREIGN KEY (event_id) REFERENCES events(id),
+  UNIQUE (event_id, user_id, log_date, category)
 );
 
-CREATE TABLE IF NOT EXISTS user_stats (
-  user_id TEXT PRIMARY KEY,
-  total_score INTEGER DEFAULT 0,
-  results_count INTEGER DEFAULT 0,
-  last_update DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_challenges_date ON daily_challenges(date);
-CREATE INDEX IF NOT EXISTS idx_results_user ON results(user_id);
-CREATE INDEX IF NOT EXISTS idx_results_challenge ON results(challenge_id);
-CREATE INDEX IF NOT EXISTS idx_results_date ON results(submitted_at);
+CREATE INDEX IF NOT EXISTS idx_logs_user_date ON daily_logs(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_logs_date ON daily_logs(date);
+CREATE INDEX IF NOT EXISTS idx_events_dates ON events(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_hits_event ON event_hits(event_id);

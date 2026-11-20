@@ -8,8 +8,8 @@ const db = require('./db');
 const { errorHandler } = require('./middleware/errorHandler');
 
 const authRoutes = require('./routes/auth');
-const challengeRoutes = require('./routes/challenges');
-const resultRoutes = require('./routes/results');
+const logRoutes = require('./routes/logs');
+const eventRoutes = require('./routes/events');
 const leaderboardRoutes = require('./routes/leaderboard');
 const userRoutes = require('./routes/users');
 const adminRoutes = require('./routes/admin');
@@ -20,7 +20,8 @@ app.use(cors({ origin: config.corsOrigin }));
 // CSP disabled: the built frontend loads Google Fonts and data: URI avatars,
 // which would need careful directive tuning to avoid breaking the app.
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(bodyParser.json());
+// 2mb: admin uploads villain images as base64 data URLs (~1MB image)
+app.use(bodyParser.json({ limit: '2mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.get('/health', (req, res) => {
@@ -28,8 +29,8 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api/challenges', challengeRoutes);
-app.use('/api/results', resultRoutes);
+app.use('/api/logs', logRoutes);
+app.use('/api/events', eventRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
@@ -48,10 +49,12 @@ app.use((req, res) => {
 
 app.use(errorHandler);
 
-app.listen(config.port, () => {
-  console.log('[' + new Date().toISOString() + '] FrikiQuest API running on port ' + config.port);
-  console.log('Environment: ' + config.nodeEnv);
-});
+db.ready.then(() => {
+  app.listen(config.port, () => {
+    console.log('[' + new Date().toISOString() + '] FrikiQuest API running on port ' + config.port);
+    console.log('Environment: ' + config.nodeEnv);
+  });
+}).catch(() => process.exit(1));
 
 process.on('SIGINT', () => {
   console.log('\nShutting down...');

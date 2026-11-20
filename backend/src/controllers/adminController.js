@@ -52,8 +52,8 @@ const adminController = {
         }
       }
 
-      await db.run('DELETE FROM results WHERE user_id = ?', [id]);
-      await db.run('DELETE FROM user_stats WHERE user_id = ?', [id]);
+      // event_hits are kept on purpose so the villain doesn't heal.
+      await db.run('DELETE FROM daily_logs WHERE user_id = ?', [id]);
       await db.run('DELETE FROM users WHERE id = ?', [id]);
 
       res.status(204).send();
