@@ -9,8 +9,8 @@ const userController = {
       const user = await db.get('SELECT id, name FROM users WHERE id = ?', [userId]);
       if (!user) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
 
-      const stats = await db.get('SELECT total_score, results_count FROM user_stats WHERE user_id = ?', [userId]);
-      res.json({ userId: user.id, name: user.name, totalScore: stats?.total_score || 0, resultsCount: stats?.results_count || 0 });
+      const stats = await db.get('SELECT COALESCE(SUM(xp), 0) AS total, COUNT(*) AS days FROM daily_logs WHERE user_id = ?', [userId]);
+      res.json({ userId: user.id, name: user.name, totalScore: stats.total, daysLogged: stats.days });
     } catch (err) {
       next(err);
     }
@@ -60,8 +60,8 @@ const userController = {
       const user = await db.get('SELECT id FROM users WHERE id = ?', [userId]);
       if (!user) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
 
-      await db.run('DELETE FROM results WHERE user_id = ?', [userId]);
-      await db.run('DELETE FROM user_stats WHERE user_id = ?', [userId]);
+      // event_hits are kept on purpose so the villain doesn't heal.
+      await db.run('DELETE FROM daily_logs WHERE user_id = ?', [userId]);
       await db.run('DELETE FROM users WHERE id = ?', [userId]);
 
       res.status(204).send();
