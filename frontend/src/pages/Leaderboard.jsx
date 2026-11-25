@@ -8,8 +8,9 @@ function defaultAvatar(name) {
   return 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + encodeURIComponent(name || 'hero') + '&backgroundColor=ffc107&backgroundType=solid&clothingColor=ffc107'
 }
 
-function RankMedal({ rank }) {
-  const cls = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other'
+// Medals are only awarded to players who have actually scored.
+function RankMedal({ rank, score }) {
+  const cls = score > 0 && rank <= 3 ? 'rank-' + rank : 'rank-other'
   return <div className={'rank-medal ' + cls}>{rank}</div>
 }
 
@@ -60,7 +61,7 @@ export default function Leaderboard() {
           <div className="leaderboard-list">
             {entries.map(entry => (
               <div key={entry.userId} className={'leaderboard-row' + (entry.userId === user?.id ? ' is-me' : '')}>
-                <RankMedal rank={entry.rank} />
+                <RankMedal rank={entry.rank} score={entry.score} />
                 <img src={entry.avatarUrl || defaultAvatar(entry.userName)} alt="" className="lb-avatar" />
                 <span className="lb-name">{entry.userName}{entry.userId === user?.id ? ' (tú)' : ''}</span>
                 <span className="lb-score">{entry.score} XP</span>

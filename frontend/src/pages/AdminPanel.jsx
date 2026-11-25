@@ -4,8 +4,10 @@ import Header from '../components/Header'
 import Input from '../components/Input'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
+import ResetDayModal from '../components/ResetDayModal'
 import { eventService } from '../services/eventService'
 import { adminService } from '../services/adminService'
+import { useAuth } from '../hooks/useAuth'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const MAX_IMAGE_SIDE = 1024
@@ -64,6 +66,11 @@ function addDaysISO(dateStr, delta) {
   return toISODate(d)
 }
 
+function isWholeBetween(value, min, max) {
+  const n = Number(value)
+  return value !== '' && Number.isInteger(n) && n >= min && n <= max
+}
+
 function findOverlap(events, start, end, excludeId) {
   return events.find(ev => ev.id !== excludeId && ev.startDate <= end && ev.endDate >= start)
 }
@@ -80,14 +87,16 @@ function emptyForm(events = []) {
   let end = toISODate(new Date(s.getFullYear(), s.getMonth() + 1, 0))
   const next = events.filter(ev => ev.startDate > start).sort((a, b) => a.startDate.localeCompare(b.startDate))[0]
   if (next && next.startDate <= end) end = addDaysISO(next.startDate, -1)
-  return { title: '', description: '', startDate: start, endDate: end, complianceMargin: 70, image: null, imagePreview: null }
+  return { title: '', description: '', startDate: start, endDate: end, complianceMargin: 70, customMaxHp: '', hp: '', image: null, imagePreview: null }
 }
 
+const roleLabels = { user: 'Usuario', admin: 'Admin' }
 const statusLabels = { active: 'Activo', upcoming: 'Próximo', finished: 'Terminado' }
 const statusBadge = { active: 'badge-primary', upcoming: 'badge-muted', finished: 'badge-muted' }
 
 export default function AdminPanel() {
   const { showToast } = useContext(AppContext)
+  const { user: me } = useAuth()
 
   const [activeTab, setActiveTab] = useState('events')
 
@@ -97,6 +106,9 @@ export default function AdminPanel() {
   const [approvingId, setApprovingId] = useState(null)
   const [deleteUserTarget, setDeleteUserTarget] = useState(null)
   const [deletingUser, setDeletingUser] = useState(false)
+  const [resetTarget, setResetTarget] = useState(null)
+  const [roleChange, setRoleChange] = useState(null) // { user, role } awaiting confirmation
+  const [savingRole, setSavingRole] = useState(false)
 
   const [events, setEvents] = useState([])
   const [approvedUsers, setApprovedUsers] = useState(0)
@@ -152,6 +164,21 @@ export default function AdminPanel() {
     }
   }
 
+  const handleConfirmRole = async () => {
+    if (!roleChange) return
+    setSavingRole(true)
+    try {
+      await adminService.updateRole(roleChange.user.id, roleChange.role)
+      showToast(`${roleChange.user.name} ahora es ${roleLabels[roleChange.role]}`, 'success')
+      setRoleChange(null)
+      loadUsers()
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setSavingRole(false)
+    }
+  }
+
   const handleConfirmDeleteUser = async () => {
     if (!deleteUserTarget) return
     setDeletingUser(true)
@@ -193,6 +220,8 @@ export default function AdminPanel() {
     const m = Number(form.complianceMargin)
     if (!Number.isInteger(m) || m < 10 || m > 100) return 'El margen debe ser un entero entre 10 y 100'
     if (!editing && !form.image) return 'La imagen del villano es obligatoria'
+    if (form.customMaxHp !== '' && !isWholeBetween(form.customMaxHp, 1, 100000)) return 'La vida máxima debe ser un entero entre 1 y 100000'
+    if (hpChanged && !isWholeBetween(form.hp, 1, newMaxHp)) return `La vida actual debe ser un entero entre 1 y ${newMaxHp}`
     const clash = findOverlap(events, form.startDate, form.endDate, editing?.id)
     if (clash) return `Las fechas se solapan con "${clash.title}" (${clash.startDate} → ${clash.endDate}). Elige otras fechas.`
     return null
@@ -207,6 +236,8 @@ export default function AdminPanel() {
       startDate: ev.startDate,
       endDate: ev.endDate,
       complianceMargin: ev.complianceMargin,
+      customMaxHp: ev.customMaxHp ?? '',
+      hp: ev.hp,
       image: null,
       imagePreview: eventService.imageSrc(ev),
     })
@@ -227,6 +258,9 @@ export default function AdminPanel() {
         startDate: form.startDate,
         endDate: form.endDate,
         complianceMargin: Number(form.complianceMargin),
+        customMaxHp: form.customMaxHp === '' ? null : Number(form.customMaxHp),
+        // Only sent when edited, so hits landing while the form is open aren't undone.
+        ...(hpChanged ? { hp: Number(form.hp) } : {}),
         ...(form.image ? { image: form.image } : {}),
       }
       if (editing) {
@@ -262,6 +296,8 @@ export default function AdminPanel() {
 
   const hpPreview = expectedHp(approvedUsers, form.startDate, form.endDate, Number(form.complianceMargin))
   const daysPreview = daysInclusive(form.startDate, form.endDate)
+  const newMaxHp = form.customMaxHp === '' ? hpPreview : Number(form.customMaxHp)
+  const hpChanged = !!editing && String(form.hp) !== String(editing.hp)
 
   return (
     <>
@@ -271,117 +307,129 @@ export default function AdminPanel() {
           <Button variant={activeTab === 'events' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('events')}>Eventos</Button>
           <Button variant={activeTab === 'users' ? 'primary' : 'secondary'} auto onClick={() => setActiveTab('users')}>Usuarios</Button>
         </div>
-      </div>
 
-      {activeTab === 'events' && (
-      <div className="page-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-          <h2 className="page-title" style={{ marginBottom: 0 }}>Eventos</h2>
-          <Button auto onClick={handleOpenAdd}>+ Nuevo evento</Button>
-        </div>
-        <p className="text-muted mt-sm" style={{ fontSize: '13px' }}>
-          Cada hábito cumplido durante el evento quita 1 HP al villano. La vida se calcula como
-          usuarios × días × 3 × margen de cumplimiento.
-        </p>
-
-        {eventsLoading ? (
-          <p className="text-muted mt-md">Cargando...</p>
-        ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Evento</th>
-                  <th>Fechas</th>
-                  <th>Vida</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.length === 0 ? (
-                  <tr><td colSpan={5} className="admin-table-empty">Todavía no hay eventos</td></tr>
-                ) : events.map(ev => (
-                  <tr key={ev.id}>
-                    <td>
-                      {ev.imageUrl
-                        ? <img src={eventService.imageSrc(ev)} alt="" className="event-thumb" style={ev.isDefeated ? { filter: 'grayscale(1)' } : undefined} />
-                        : <span className="event-thumb">👹</span>}
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{ev.title}</div>
-                      <span className={'badge ' + statusBadge[ev.status]}>{statusLabels[ev.status]}</span>
-                      {ev.isDefeated && <span className="badge badge-success" style={{ marginLeft: 4 }}>Derrotado</span>}
-                    </td>
-                    <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                      {formatShort(ev.startDate)}<br />{formatShort(ev.endDate)}
-                    </td>
-                    <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
-                      {ev.hp} / {ev.maxHp} HP ({ev.hpPercent}%)
-                      <div className="event-mini-hp"><div style={{ width: ev.hpPercent + '%' }} /></div>
-                      <span className="text-muted">Margen {ev.complianceMargin}%</span>
-                    </td>
-                    <td>
-                      <button className="admin-row-btn" title="Editar" onClick={() => handleOpenEdit(ev)}>✎</button>
-                      <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteTarget(ev)}>🗑</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {activeTab === 'events' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+            <h2 className="page-title" style={{ marginBottom: 0 }}>Eventos</h2>
+            <Button auto onClick={handleOpenAdd}>+ Nuevo evento</Button>
           </div>
+          <p className="text-muted mt-sm" style={{ fontSize: '13px' }}>
+            Cada hábito cumplido durante el evento quita 1 HP al villano. La vida se calcula como
+            usuarios × días × 3 × margen de cumplimiento, salvo que la fijes a mano al editar el evento.
+          </p>
+
+          {eventsLoading ? (
+            <p className="text-muted mt-md">Cargando...</p>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Evento</th>
+                    <th>Fechas</th>
+                    <th>Vida</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.length === 0 ? (
+                    <tr><td colSpan={5} className="admin-table-empty">Todavía no hay eventos</td></tr>
+                  ) : events.map(ev => (
+                    <tr key={ev.id}>
+                      <td>
+                        {ev.imageUrl
+                          ? <img src={eventService.imageSrc(ev)} alt="" className="event-thumb" style={ev.isDefeated ? { filter: 'grayscale(1)' } : undefined} />
+                          : <span className="event-thumb">👹</span>}
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{ev.title}</div>
+                        <span className={'badge ' + statusBadge[ev.status]}>{statusLabels[ev.status]}</span>
+                        {ev.isDefeated && <span className="badge badge-success" style={{ marginLeft: 4 }}>Derrotado</span>}
+                      </td>
+                      <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                        {formatShort(ev.startDate)}<br />{formatShort(ev.endDate)}
+                      </td>
+                      <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
+                        {ev.hp} / {ev.maxHp} HP ({ev.hpPercent}%)
+                        <div className="event-mini-hp"><div style={{ width: ev.hpPercent + '%' }} /></div>
+                        <span className="text-muted">{ev.customMaxHp ? 'Vida fijada a mano' : `Margen ${ev.complianceMargin}%`}</span>
+                      </td>
+                      <td>
+                        <button className="admin-row-btn" title="Editar" onClick={() => handleOpenEdit(ev)}>✎</button>
+                        <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteTarget(ev)}>🗑</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        )}
+
+        {activeTab === 'users' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 className="page-title" style={{ marginBottom: 0 }}>Usuarios</h2>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', margin: 'var(--spacing-md) 0' }}>
+            <Button variant={userFilter === 'all' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('all')}>Todos</Button>
+            <Button variant={userFilter === 'pending' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('pending')}>Pendientes</Button>
+          </div>
+
+          {usersLoading ? (
+            <p className="text-muted mt-md">Cargando...</p>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                    <th>Rol</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.length === 0 ? (
+                    <tr><td colSpan={5} className="admin-table-empty">Sin usuarios</td></tr>
+                  ) : users.map(u => (
+                    <tr key={u.id}>
+                      <td>{u.name}</td>
+                      <td>{u.email}</td>
+                      <td>
+                        <select
+                          className="admin-role-select"
+                          aria-label={'Rol de ' + u.name}
+                          title={u.id === me?.id ? 'No puedes cambiar tu propio rol' : u.status === 'pending' ? 'Aprueba al usuario antes' : undefined}
+                          disabled={u.id === me?.id || u.status === 'pending'}
+                          value={u.role}
+                          onChange={e => setRoleChange({ user: u, role: e.target.value })}
+                        >
+                          {Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </td>
+                      <td><span className={'badge ' + (u.status === 'pending' ? 'badge-muted' : 'badge-success')}>{u.status === 'pending' ? 'Pendiente' : 'Aprobado'}</span></td>
+                      <td>
+                        {u.status === 'pending' && (
+                          <button className="admin-row-btn" title="Aprobar" disabled={approvingId === u.id} onClick={() => handleApprove(u)}>✓</button>
+                        )}
+                        <button className="admin-row-btn" title="Reiniciar día" aria-label={'Reiniciar día de ' + u.name} onClick={() => setResetTarget(u)}>↺</button>
+                        <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteUserTarget(u)}>🗑</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
         )}
       </div>
-      )}
-
-      {activeTab === 'users' && (
-      <div className="page-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 className="page-title" style={{ marginBottom: 0 }}>Usuarios</h2>
-        </div>
-
-        <div style={{ display: 'flex', gap: '8px', margin: 'var(--spacing-md) 0' }}>
-          <Button variant={userFilter === 'all' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('all')}>Todos</Button>
-          <Button variant={userFilter === 'pending' ? 'primary' : 'secondary'} auto onClick={() => setUserFilter('pending')}>Pendientes</Button>
-        </div>
-
-        {usersLoading ? (
-          <p className="text-muted mt-md">Cargando...</p>
-        ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Email</th>
-                  <th>Rol</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.length === 0 ? (
-                  <tr><td colSpan={5} className="admin-table-empty">Sin usuarios</td></tr>
-                ) : users.map(u => (
-                  <tr key={u.id}>
-                    <td>{u.name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role}</td>
-                    <td><span className={'badge ' + (u.status === 'pending' ? 'badge-muted' : 'badge-success')}>{u.status === 'pending' ? 'Pendiente' : 'Aprobado'}</span></td>
-                    <td>
-                      {u.status === 'pending' && (
-                        <button className="admin-row-btn" title="Aprobar" disabled={approvingId === u.id} onClick={() => handleApprove(u)}>✓</button>
-                      )}
-                      <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteUserTarget(u)}>🗑</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      )}
 
       <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editing ? 'Editar evento' : 'Nuevo evento'}>
         <form onSubmit={handleSubmit}>
@@ -402,7 +450,7 @@ export default function AdminPanel() {
             <label>Imagen del villano{!editing && <span style={{ color: 'var(--color-primary)' }}> *</span>}</label>
             <input type="file" accept={IMAGE_TYPES.join(',')} onChange={handleImage} className="input" />
             <span className="text-muted" style={{ fontSize: '12px' }}>
-              PNG, JPG, WEBP o GIF · se redimensiona automáticamente{editing ? ' · déjalo vacío para mantener la actual' : ''}. Mejor con fondo transparente.
+              PNG, JPG, WEBP o GIF · se redimensiona automáticamente{editing ? ' · déjalo vacío para mantener la actual' : ''}. Mejor en horizontal y con el villano en la parte superior: el texto y la vida van encima.
               {processingImage && ' Procesando…'}
             </span>
             {form.imagePreview && <img src={form.imagePreview} alt="Vista previa" className="event-image-preview" />}
@@ -415,9 +463,20 @@ export default function AdminPanel() {
 
           <Input type="number" label="Margen de cumplimiento (%)" value={form.complianceMargin} onChange={setField('complianceMargin')} required />
 
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <Input type="number" label="Vida máxima (HP)" placeholder={`Automática: ${hpPreview}`} value={form.customMaxHp} onChange={setField('customMaxHp')} />
+            {editing && <Input type="number" label="Vida actual (HP)" value={form.hp} onChange={setField('hp')} />}
+          </div>
+
           <div className="event-hp-calc">
-            {approvedUsers} usuarios × {daysPreview} días × 3 hábitos × {form.complianceMargin || 0}% = <strong>{hpPreview} HP</strong>
-            {editing && editing.damage > 0 && <> · ya ha recibido {editing.damage} golpes</>}
+            {form.customMaxHp === ''
+              ? <>Automática: {approvedUsers} usuarios × {daysPreview} días × 3 hábitos × {form.complianceMargin || 0}% = <strong>{hpPreview} HP</strong></>
+              : <>Vida máxima fijada a mano: <strong>{newMaxHp} HP</strong>. Déjala vacía para volver al cálculo automático ({hpPreview} HP).</>}
+            {editing && (
+              <><br />{hpChanged
+                ? <>El villano quedará con <strong>{form.hp || 0} HP</strong>.</>
+                : <>Se conserva el daño ({editing.damage} HP): quedará con <strong>{Math.max(0, newMaxHp - editing.damage)} HP</strong>.</>}</>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
@@ -434,6 +493,20 @@ export default function AdminPanel() {
         <div style={{ display: 'flex', gap: '8px' }}>
           <Button variant="danger" onClick={handleConfirmDelete} loading={deleting}>Sí, eliminar</Button>
           <Button variant="secondary" onClick={() => setDeleteTarget(null)} auto>Cancelar</Button>
+        </div>
+      </Modal>
+
+      <ResetDayModal user={resetTarget} onClose={() => setResetTarget(null)} onReset={loadEvents} showToast={showToast} />
+
+      <Modal isOpen={!!roleChange} onClose={() => setRoleChange(null)} title="Cambiar rol">
+        <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>
+          {roleChange?.role === 'admin'
+            ? `¿Hacer admin a "${roleChange?.user.name}"? Podrá gestionar eventos y usuarios, incluido eliminarlos.`
+            : `¿Quitar los permisos de admin a "${roleChange?.user.name}"? Dejará de tener acceso al panel.`}
+        </p>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button onClick={handleConfirmRole} loading={savingRole}>Sí, cambiar rol</Button>
+          <Button variant="secondary" onClick={() => setRoleChange(null)} auto>Cancelar</Button>
         </div>
       </Modal>
 
