@@ -16,8 +16,9 @@ function defaultAvatar(name) {
   return 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + encodeURIComponent(name || 'hero') + '&backgroundColor=ffc107&backgroundType=solid&clothingColor=ffc107'
 }
 
-function RankMedal({ rank }) {
-  const cls = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other'
+// Medals are only awarded to players who have actually scored.
+function RankMedal({ rank, score }) {
+  const cls = score > 0 && rank <= 3 ? 'rank-' + rank : 'rank-other'
   return <div className={'rank-medal ' + cls}>{rank}</div>
 }
 
@@ -26,6 +27,9 @@ function victorySeen(eventId) {
 }
 function markVictorySeen(eventId) {
   try { localStorage.setItem('fq_victory_' + eventId, '1') } catch {}
+}
+function forgetVictory(eventId) {
+  try { localStorage.removeItem('fq_victory_' + eventId) } catch {}
 }
 
 function StreakBadge({ streak }) {
@@ -74,23 +78,23 @@ function PlayerCard({ user }) {
   )
 }
 
-/** Compact player strip shown under the villain during an event. */
-function PlayerStrip({ user, xpPulseKey }) {
+/** Compact player summary shown in the header during an event. */
+function HeaderPlayer({ user, xpPulseKey }) {
   const rank = user?.rank
   return (
-    <div className="player-strip">
-      <img src={user?.avatarUrl || defaultAvatar(user?.name)} alt="" className="player-strip-avatar" />
-      <div className="player-strip-main">
-        <div className="player-strip-name">{user?.name}</div>
-        <div className="player-strip-badges">
-          {rank && <span className="player-strip-rank" style={{ color: rank.color }}>{rank.emoji} {rank.name}</span>}
+    <div className="header-player">
+      <div className="header-player-main">
+        <div className="header-player-name">{user?.name}</div>
+        <div className="header-player-badges">
+          {rank && <span className="header-player-rank" style={{ color: rank.color }}>{rank.emoji} {rank.name}</span>}
           <StreakBadge streak={user?.streak} />
         </div>
       </div>
-      <div className={'player-strip-xp' + (xpPulseKey ? ' pulse' : '')} key={xpPulseKey}>
-        <span className="player-strip-xp-value">{user?.totalScore || 0}</span>
-        <span className="player-strip-xp-label">XP</span>
+      <div className={'header-player-xp' + (xpPulseKey ? ' pulse' : '')} key={xpPulseKey}>
+        <span className="header-player-xp-value">{user?.totalScore || 0}</span>
+        <span className="header-player-xp-label">XP</span>
       </div>
+      <img src={user?.avatarUrl || defaultAvatar(user?.name)} alt="" className="header-player-avatar" />
     </div>
   )
 }
@@ -129,10 +133,17 @@ export default function Dashboard() {
           showToast(`⚔️ ¡${who} ${names.length === 1 ? 'ha' : 'han'} golpeado al villano!`, 'info')
         }
       }
-      lastSeqRef.current = Math.max(lastSeqRef.current ?? 0, maxSeq)
+      // Not a running maximum: an admin day reset removes hits and frees their seq numbers.
+      lastSeqRef.current = maxSeq
     }
 
-    if (ev.isDefeated && !victorySeen(ev.id)) setShowVictory(true)
+    if (ev.isDefeated) {
+      if (!victorySeen(ev.id)) setShowVictory(true)
+    } else {
+      // The villain can come back to life after a reset; celebrate again next time.
+      forgetVictory(ev.id)
+      setShowVictory(false)
+    }
   }
 
   const loadEvent = async (opts = { animateOthers: false }) => {
@@ -199,17 +210,12 @@ export default function Dashboard() {
 
   return (
     <>
-      <Header />
+      <Header>
+        {event && <HeaderPlayer user={user} xpPulseKey={xpPulseKey} />}
+      </Header>
       <div className="page-content">
 
-        {event ? (
-          <>
-            <VillainBoss event={event} hit={hit} />
-            <PlayerStrip user={user} xpPulseKey={xpPulseKey} />
-          </>
-        ) : (
-          <PlayerCard user={user} />
-        )}
+        {event ? <VillainBoss event={event} hit={hit} /> : <PlayerCard user={user} />}
 
         <DailyCheckin log={log} pending={pending} onMark={handleMark} />
 
@@ -223,7 +229,7 @@ export default function Dashboard() {
               <p className="text-muted" style={{ padding: '16px', textAlign: 'center', fontSize: '13px' }}>Sin datos aún</p>
             ) : leaderboard.map(entry => (
               <div key={entry.userId} className={'leaderboard-row' + (entry.userId === user?.id ? ' is-me' : '')}>
-                <RankMedal rank={entry.rank} />
+                <RankMedal rank={entry.rank} score={entry.score} />
                 <img src={entry.avatarUrl || defaultAvatar(entry.userName)} alt="" className="lb-avatar" />
                 <span className="lb-name">{entry.userName}{entry.userId === user?.id ? ' (tú)' : ''}</span>
                 <span className="lb-score">{entry.score} XP</span>

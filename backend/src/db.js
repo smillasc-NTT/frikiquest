@@ -75,6 +75,10 @@ async function initializeSchema() {
   // Existing users are auto-approved
   await addColumn("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'");
 
+  // Admin HP edits: a fixed max HP (NULL = formula) and an offset added to the hit count.
+  await addColumn('ALTER TABLE events ADD COLUMN custom_max_hp INTEGER');
+  await addColumn('ALTER TABLE events ADD COLUMN damage_adjust INTEGER NOT NULL DEFAULT 0');
+
   if (version < 1) await exec('PRAGMA user_version = 1');
   console.log('Database schema initialized');
 }
