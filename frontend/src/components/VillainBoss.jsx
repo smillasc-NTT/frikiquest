@@ -68,10 +68,11 @@ export default function VillainBoss({ event, hit }) {
   useEffect(() => {
     const el = stageRef.current
     if (!el || typeof IntersectionObserver === 'undefined') return
-    // Show the HUD as soon as the villain image is mostly hidden (60px = sticky header height).
+    // Show the HUD when the header starts covering the life bar overlaid on the
+    // bottom of the image (60px = sticky header height).
     const obs = new IntersectionObserver(
-      ([entry]) => setCardHidden(!entry.isIntersecting),
-      { rootMargin: '-60px 0px 0px 0px', threshold: 0.6 }
+      ([entry]) => setCardHidden(entry.intersectionRatio < 0.4),
+      { rootMargin: '-60px 0px 0px 0px', threshold: 0.4 }
     )
     obs.observe(el)
     return () => obs.disconnect()
@@ -82,15 +83,14 @@ export default function VillainBoss({ event, hit }) {
   const dead = event.isDefeated
   const daysLabel = `${event.daysLeft} ${event.daysLeft === 1 ? 'día' : 'días'}`
   // Remounting the figure on every hit key replays the shake/flash animation.
-  const figureProps = { className: 'boss-figure' + (hit?.key ? ' is-hit' : ''), key: hit?.key || 0 }
+  const figureKey = hit?.key || 0
+  const figureClass = 'boss-figure' + (hit?.key ? ' is-hit' : '')
 
   return (
     <>
       <div className={'boss-card' + (dead ? ' is-dead' : '')}>
-        <div className="boss-tag">☠ Evento · {daysLabel} {event.daysLeft === 1 ? 'restante' : 'restantes'}</div>
-
         <div className="boss-stage" ref={stageRef}>
-          <div {...figureProps}>
+          <div key={figureKey} className={figureClass}>
             <BossImage event={event} src={src} />
             <div className="boss-flash" />
           </div>
@@ -98,28 +98,32 @@ export default function VillainBoss({ event, hit }) {
           {dead && <div className="boss-dead-stamp">DERROTADO</div>}
         </div>
 
-        <h2 className="boss-title">{event.title}</h2>
-        <p className="boss-desc">{event.description}</p>
+        <div className="boss-tag">☠ Evento · {daysLabel} {event.daysLeft === 1 ? 'restante' : 'restantes'}</div>
 
-        <div className="boss-hp">
-          <div className="boss-hp-label">
-            <span>Vida</span>
-            <span className="boss-hp-value">{dead ? '0' : pct.toFixed(1)}%</span>
+        <div className="boss-overlay">
+          <h2 className="boss-title">{event.title}</h2>
+          <p className="boss-desc">{event.description}</p>
+
+          <div className="boss-hp">
+            <div className="boss-hp-label">
+              <span>Vida</span>
+              <span className="boss-hp-value">{dead ? '0' : pct.toFixed(1)}%</span>
+            </div>
+            <HpBar pct={pct} />
+            <div className="boss-hp-meta">{event.hp} / {event.maxHp} HP</div>
           </div>
-          <HpBar pct={pct} />
-          <div className="boss-hp-meta">{event.hp} / {event.maxHp} HP</div>
-        </div>
 
-        {dead && event.finishingBlow && (
-          <p className="boss-finisher">Golpe final: <strong>{event.finishingBlow.userName}</strong></p>
-        )}
+          {dead && event.finishingBlow && (
+            <p className="boss-finisher">Golpe final: <strong>{event.finishingBlow.userName}</strong></p>
+          )}
+        </div>
       </div>
 
       {cardHidden && (
         <div className={'boss-hud' + (dead ? ' is-dead' : '')} aria-hidden="true">
           <div className="boss-hud-inner">
             <div className="boss-hud-stage">
-              <div {...figureProps}>
+              <div key={figureKey} className={figureClass}>
                 <BossImage event={event} src={src} />
                 <div className="boss-flash" />
               </div>

@@ -1,7 +1,9 @@
+import { HulkArmIcon, SpeedsterBootIcon, ChimichangaIcon } from './QuestIcons'
+
 const ITEMS = [
-  { category: 'training', icon: '🏋️', label: 'Entreno', hint: 'del día', tone: 'fire' },
-  { category: 'steps', icon: '👟', label: '10.000', hint: 'pasos', tone: 'volt' },
-  { category: 'nutrition', icon: '🥗', label: 'Nutrición', hint: 'Dieta cumplida', tone: 'toxic' },
+  { category: 'training', Icon: HulkArmIcon, label: 'Entreno', hint: 'del día', tone: 'fire' },
+  { category: 'steps', Icon: SpeedsterBootIcon, label: '10.000', hint: 'pasos', tone: 'volt' },
+  { category: 'nutrition', Icon: ChimichangaIcon, label: 'Nutrición', hint: 'Dieta cumplida', tone: 'toxic' },
 ]
 
 /**
@@ -32,7 +34,7 @@ export default function DailyCheckin({ log, pending, onMark, xpPerItem = 10 }) {
               onClick={() => onMark(item.category, 'done')}
             >
               <span className="quest-glow" aria-hidden="true" />
-              <span className="quest-icon">{done ? '✔' : item.icon}</span>
+              <span className="quest-icon">{done ? '✔' : <item.Icon />}</span>
               <span className="quest-label">{item.label}</span>
               <span className="quest-hint">{item.hint}</span>
               <span className="quest-reward">{done ? `+${xpPerItem} XP ✓` : `+${xpPerItem} XP`}</span>

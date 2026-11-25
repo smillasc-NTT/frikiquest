@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,700;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Russo+One&display=swap');
 
 :root {
   /* FrikiQuest Design System - Stitch */
@@ -20,6 +20,7 @@
   --color-rank-gold: #FFD700;
   --color-rank-silver: #C0C0C0;
   --color-rank-bronze: #CD7F32;
+  --font-display: 'Russo One', sans-serif;
   --radius-sm: 4px;
   --radius: 8px;
   --radius-md: 12px;
@@ -44,12 +45,12 @@ body {
 }
 
 h1, h2, h3, h4 {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-weight: 400;
   line-height: 1.2;
 }
 
-h1 { font-size: 32px; font-style: italic; }
+h1 { font-size: 32px; }
 h2 { font-size: 24px; }
 h3 { font-size: 20px; }
 
@@ -276,14 +277,12 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 20px 60px rgba(0,0,0,0.6);
 }
 .auth-logo {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-display);
   font-size: 28px;
-  font-weight: 700;
-  font-style: italic;
+  font-weight: 400;
   color: var(--color-primary);
   text-align: center;
   margin-bottom: var(--spacing-xs);
-  letter-spacing: -0.5px;
   text-shadow: 0 0 20px rgba(255,193,7,0.4);
 }
 .auth-subtitle {
@@ -322,10 +321,9 @@ a:hover { text-decoration: underline; }
   gap: var(--spacing-lg);
 }
 .header-logo {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-display);
   font-size: 20px;
-  font-weight: 700;
-  font-style: italic;
+  font-weight: 400;
   color: var(--color-primary);
   text-shadow: 0 0 12px rgba(255,193,7,0.3);
   flex-shrink: 0;
@@ -393,9 +391,9 @@ a:hover { text-decoration: underline; }
   margin-bottom: var(--spacing-md);
 }
 .stat-value {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-display);
   font-size: 32px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--color-primary);
   line-height: 1;
 }
@@ -458,9 +456,9 @@ a:hover { text-decoration: underline; }
 .rank-other { background-color: var(--color-surface-highest); color: var(--color-text-muted); font-size: 11px; }
 .lb-name { flex: 1; font-size: 14px; font-weight: 500; }
 .lb-score {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-display);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--color-primary);
 }
 .lb-change {
@@ -485,7 +483,7 @@ a:hover { text-decoration: underline; }
 .profile-info-item:last-child { border-bottom: none; margin-bottom: 0; }
 .profile-info-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); margin-bottom: 4px; }
 .profile-info-value { font-size: 15px; font-weight: 500; }
-.profile-score { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; color: var(--color-primary); }
+.profile-score { font-family: var(--font-display); font-size: 28px; font-weight: 400; color: var(--color-primary); }
 .actions-card { display: flex; flex-direction: column; gap: var(--spacing-sm); }
 .danger-zone {
   margin-top: var(--spacing-lg);
@@ -667,8 +665,11 @@ a:hover { text-decoration: underline; }
 }
 .bottom-nav-item:hover { text-decoration: none; color: var(--color-primary); }
 .bottom-nav-item.active { color: var(--color-primary); }
-.bottom-nav-icon { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
-.bottom-nav-icon svg { width: 24px; height: 24px; transition: color 0.15s; }
+.bottom-nav-icon { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; }
+.bottom-nav-icon svg { width: 30px; height: 30px; transition: filter 0.15s, opacity 0.15s, transform 0.15s; }
+/* The colour icons are greyed out until their tab is active or hovered. */
+.bottom-nav-item:not(.active):not(:hover) .bottom-nav-icon svg { filter: grayscale(1); opacity: 0.6; }
+.bottom-nav-item.active .bottom-nav-icon svg { transform: scale(1.08); }
 
 /* === HEADER SIMPLIFIED === */
 .header-page-title {
@@ -790,6 +791,17 @@ a:hover { text-decoration: underline; }
   color: var(--color-text-muted);
 }
 .admin-pagination-spacer { flex: 1; }
+.admin-role-select {
+  background-color: var(--color-surface-high);
+  color: var(--color-text);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.admin-role-select:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.admin-role-select:disabled { opacity: 0.5; cursor: not-allowed; }
 .admin-row-btn {
   background: none;
   border: none;

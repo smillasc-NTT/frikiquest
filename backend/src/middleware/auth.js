@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const db = require('../db');
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -18,11 +19,18 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin only', code: 'FORBIDDEN' });
+// The role is read from the database, not from the token: role changes and
+// deleted accounts take effect at once instead of when the token expires.
+const requireAdmin = async (req, res, next) => {
+  try {
+    const user = await db.get('SELECT role FROM users WHERE id = ?', [req.user?.sub]);
+    if (user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin only', code: 'FORBIDDEN' });
+    }
+    next();
+  } catch (err) {
+    next(err);
   }
-  next();
 };
 
 module.exports = { authenticateToken, requireAdmin };

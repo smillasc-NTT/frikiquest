@@ -3,14 +3,21 @@ const validators = require('../utils/validators');
 const helpers = require('../utils/helpers');
 const events = require('../utils/events');
 
+const MAX_CUSTOM_HP = 100000;
+
+const isValidHp = (value, max) => Number.isInteger(value) && value >= 1 && value <= max;
+
 /** Validates the admin form. Returns an error message or null. */
-function validateEventInput({ title, description, startDate, endDate, complianceMargin, image }, { imageRequired }) {
+function validateEventInput({ title, description, startDate, endDate, complianceMargin, image, customMaxHp }, { imageRequired }) {
   if (!title || !String(title).trim()) return 'El título es obligatorio';
   if (!description || !String(description).trim()) return 'La descripción es obligatoria';
   if (!helpers.isValidDate(startDate) || !helpers.isValidDate(endDate)) return 'Fechas no válidas';
   if (endDate < startDate) return 'La fecha de fin debe ser posterior a la de inicio';
   const margin = Number(complianceMargin);
   if (!Number.isInteger(margin) || margin < 10 || margin > 100) return 'El margen debe ser un entero entre 10 y 100';
+  if (customMaxHp != null && !isValidHp(customMaxHp, MAX_CUSTOM_HP)) {
+    return `La vida máxima debe ser un entero entre 1 y ${MAX_CUSTOM_HP}`;
+  }
   if (imageRequired && !image) return 'La imagen es obligatoria';
   if (image && !validators.isValidImageDataUrl(image)) return 'Imagen no válida (PNG, JPG, WEBP o GIF, máx ~1MB)';
   return null;
@@ -81,11 +88,12 @@ const eventController = {
       const overlap = await findOverlap(startDate, endDate);
       if (overlap) return res.status(400).json({ error: overlapMessage(overlap), code: 'EVENT_OVERLAP' });
 
-      const maxHp = helpers.calculateMaxHp(await events.countApprovedUsers(), startDate, endDate, margin);
+      const customMaxHp = req.body.customMaxHp ?? null;
+      const maxHp = customMaxHp ?? helpers.calculateMaxHp(await events.countApprovedUsers(), startDate, endDate, margin);
       const id = helpers.generateId();
       await db.run(
-        'INSERT INTO events (id, title, description, image, start_date, end_date, compliance_margin, max_hp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, title.trim(), description.trim(), image, startDate, endDate, margin, maxHp]
+        'INSERT INTO events (id, title, description, image, start_date, end_date, compliance_margin, max_hp, custom_max_hp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, title.trim(), description.trim(), image, startDate, endDate, margin, maxHp, customMaxHp]
       );
       const event = await db.get(`SELECT ${events.EVENT_COLUMNS} FROM events WHERE id = ?`, [id]);
       res.status(201).json(await events.toEventPayload(event));
@@ -94,11 +102,15 @@ const eventController = {
     }
   },
 
-  /** Recomputes max_hp with the current number of approved users; damage already dealt is kept. */
+  /**
+   * max_hp is `customMaxHp` if set, otherwise recomputed with the current number
+   * of approved users; damage already dealt is kept. `hp` (optional) overrides
+   * the current life. Omitting `customMaxHp` keeps the stored one, null clears it.
+   */
   update: async (req, res, next) => {
     try {
       const { id } = req.params;
-      const existing = await db.get('SELECT id FROM events WHERE id = ?', [id]);
+      const existing = await db.get('SELECT id, custom_max_hp FROM events WHERE id = ?', [id]);
       if (!existing) return res.status(404).json({ error: 'Event not found', code: 'NOT_FOUND' });
 
       const error = validateEventInput(req.body, { imageRequired: false });
@@ -109,11 +121,19 @@ const eventController = {
       const overlap = await findOverlap(startDate, endDate, id);
       if (overlap) return res.status(400).json({ error: overlapMessage(overlap), code: 'EVENT_OVERLAP' });
 
-      const maxHp = helpers.calculateMaxHp(await events.countApprovedUsers(), startDate, endDate, margin);
+      const customMaxHp = req.body.customMaxHp === undefined ? existing.custom_max_hp : req.body.customMaxHp;
+      const maxHp = customMaxHp ?? helpers.calculateMaxHp(await events.countApprovedUsers(), startDate, endDate, margin);
+      const { hp } = req.body;
+      if (hp != null && !isValidHp(hp, maxHp)) {
+        return res.status(400).json({ error: `La vida actual debe ser un entero entre 1 y ${maxHp}`, code: 'VALIDATION_ERROR' });
+      }
+      // Stored as an offset over the real hits, so later hits keep subtracting from it.
+      const damageAdjust = hp != null ? maxHp - hp - (await events.countHits(id)) : null;
       await db.run(
         `UPDATE events SET title = ?, description = ?, start_date = ?, end_date = ?, compliance_margin = ?, max_hp = ?,
+         custom_max_hp = ?, damage_adjust = COALESCE(?, damage_adjust),
          image = COALESCE(?, image), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [title.trim(), description.trim(), startDate, endDate, margin, maxHp, image || null, id]
+        [title.trim(), description.trim(), startDate, endDate, margin, maxHp, customMaxHp, damageAdjust, image || null, id]
       );
       const event = await db.get(`SELECT ${events.EVENT_COLUMNS} FROM events WHERE id = ?`, [id]);
       res.json(await events.toEventPayload(event));
