@@ -119,6 +119,7 @@ export default function AdminPanel() {
   const [form, setForm] = useState(() => emptyForm())
   const [processingImage, setProcessingImage] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
 
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
@@ -194,7 +195,11 @@ export default function AdminPanel() {
     }
   }
 
-  const setField = (field) => (e) => setForm(f => ({ ...f, [field]: e.target.value }))
+  const setField = (field) => (e) => {
+    const { value } = e.target
+    setFormError('')
+    setForm(f => ({ ...f, [field]: value, ...(field === 'hp' ? { hpTouched: true } : {}) }))
+  }
 
   const handleImage = async (e) => {
     const file = e.target.files?.[0]
@@ -227,7 +232,7 @@ export default function AdminPanel() {
     return null
   }
 
-  const handleOpenAdd = () => { setForm(emptyForm(events)); setEditing(null); setShowFormModal(true) }
+  const handleOpenAdd = () => { setForm(emptyForm(events)); setEditing(null); setFormError(''); setShowFormModal(true) }
 
   const handleOpenEdit = (ev) => {
     setForm({
@@ -242,13 +247,16 @@ export default function AdminPanel() {
       imagePreview: eventService.imageSrc(ev),
     })
     setEditing(ev)
+    setFormError('')
     setShowFormModal(true)
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     const error = validate()
-    if (error) { showToast(error, 'error'); return }
+    // Shown inside the form: on phones a toast covers the buttons and soon disappears.
+    if (error) { setFormError(error); return }
+    setFormError('')
 
     setSaving(true)
     try {
@@ -273,7 +281,7 @@ export default function AdminPanel() {
       setShowFormModal(false)
       loadEvents()
     } catch (err) {
-      showToast(err.message, 'error')
+      setFormError('No se ha podido guardar: ' + err.message)
     } finally {
       setSaving(false)
     }
@@ -297,7 +305,8 @@ export default function AdminPanel() {
   const hpPreview = expectedHp(approvedUsers, form.startDate, form.endDate, Number(form.complianceMargin))
   const daysPreview = daysInclusive(form.startDate, form.endDate)
   const newMaxHp = form.customMaxHp === '' ? hpPreview : Number(form.customMaxHp)
-  const hpChanged = !!editing && String(form.hp) !== String(editing.hp)
+  // Whatever the admin types is sent, even if it matches a life value that is out of date.
+  const hpChanged = !!editing && !!form.hpTouched
 
   return (
     <>
@@ -357,8 +366,10 @@ export default function AdminPanel() {
                         <span className="text-muted">{ev.customMaxHp ? 'Vida fijada a mano' : `Margen ${ev.complianceMargin}%`}</span>
                       </td>
                       <td>
-                        <button className="admin-row-btn" title="Editar" onClick={() => handleOpenEdit(ev)}>✎</button>
-                        <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteTarget(ev)}>🗑</button>
+                        <div className="admin-actions">
+                          <button className="admin-row-btn" title="Editar" aria-label={'Editar ' + ev.title} onClick={() => handleOpenEdit(ev)}>✎</button>
+                          <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" aria-label={'Eliminar ' + ev.title} onClick={() => setDeleteTarget(ev)}>🗑</button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -415,11 +426,13 @@ export default function AdminPanel() {
                       </td>
                       <td><span className={'badge ' + (u.status === 'pending' ? 'badge-muted' : 'badge-success')}>{u.status === 'pending' ? 'Pendiente' : 'Aprobado'}</span></td>
                       <td>
-                        {u.status === 'pending' && (
-                          <button className="admin-row-btn" title="Aprobar" disabled={approvingId === u.id} onClick={() => handleApprove(u)}>✓</button>
-                        )}
-                        <button className="admin-row-btn" title="Reiniciar día" aria-label={'Reiniciar día de ' + u.name} onClick={() => setResetTarget(u)}>↺</button>
-                        <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteUserTarget(u)}>🗑</button>
+                        <div className="admin-actions">
+                          {u.status === 'pending' && (
+                            <button className="admin-row-btn" title="Aprobar" disabled={approvingId === u.id} onClick={() => handleApprove(u)}>✓</button>
+                          )}
+                          <button className="admin-row-btn" title="Reiniciar día" aria-label={'Reiniciar día de ' + u.name} onClick={() => setResetTarget(u)}>↺</button>
+                          <button className="admin-row-btn admin-row-btn-danger" title="Eliminar" onClick={() => setDeleteUserTarget(u)}>🗑</button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -431,8 +444,8 @@ export default function AdminPanel() {
         )}
       </div>
 
-      <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editing ? 'Editar evento' : 'Nuevo evento'}>
-        <form onSubmit={handleSubmit}>
+      <Modal isOpen={showFormModal} onClose={() => setShowFormModal(false)} title={editing ? 'Editar evento' : 'Nuevo evento'} closeOnBackdrop={false}>
+        <form onSubmit={handleSubmit} noValidate>
           <Input label="Título" placeholder="Ej: El Señor del Sofá" value={form.title} onChange={setField('title')} required />
 
           <div className="input-group">
@@ -456,14 +469,14 @@ export default function AdminPanel() {
             {form.imagePreview && <img src={form.imagePreview} alt="Vista previa" className="event-image-preview" />}
           </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div className="form-row">
             <Input type="date" label="Inicio" value={form.startDate} onChange={setField('startDate')} required />
             <Input type="date" label="Fin" value={form.endDate} onChange={setField('endDate')} required />
           </div>
 
           <Input type="number" label="Margen de cumplimiento (%)" value={form.complianceMargin} onChange={setField('complianceMargin')} required />
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div className="form-row">
             <Input type="number" label="Vida máxima (HP)" placeholder={`Automática: ${hpPreview}`} value={form.customMaxHp} onChange={setField('customMaxHp')} />
             {editing && <Input type="number" label="Vida actual (HP)" value={form.hp} onChange={setField('hp')} />}
           </div>
@@ -478,6 +491,8 @@ export default function AdminPanel() {
                 : <>Se conserva el daño ({editing.damage} HP): quedará con <strong>{Math.max(0, newMaxHp - editing.damage)} HP</strong>.</>}</>
             )}
           </div>
+
+          {formError && <p className="form-error" role="alert">{formError}</p>}
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
             <Button type="submit" loading={saving} disabled={processingImage}>{editing ? 'Guardar cambios' : 'Crear evento'}</Button>
