@@ -802,18 +802,43 @@ a:hover { text-decoration: underline; }
 }
 .admin-role-select:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 .admin-role-select:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Row actions: large, bordered and well apart so edit and delete aren't mistaken. */
+.admin-actions { display: flex; align-items: center; gap: 20px; }
 .admin-row-btn {
-  background: none;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  background-color: var(--color-surface-high);
+  border: 1px solid var(--color-outline);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 22px;
   line-height: 1;
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
+  border-radius: var(--radius);
+  color: var(--color-text);
 }
-.admin-row-btn:hover { background-color: var(--color-surface-highest); color: var(--color-text); }
-.admin-row-btn-danger:hover { color: var(--color-error); }
+.admin-row-btn:hover { background-color: var(--color-surface-highest); border-color: var(--color-primary); }
+.admin-row-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.admin-row-btn:disabled { opacity: 0.5; cursor: default; }
+.admin-row-btn-danger { border-color: rgba(244,67,54,0.55); color: var(--color-error); }
+.admin-row-btn-danger:hover { background-color: rgba(244,67,54,0.15); border-color: var(--color-error); }
+
+/* === FORM LAYOUT === */
+/* Fields sit side by side when they fit and stack on narrow screens. */
+.form-row { display: flex; flex-wrap: wrap; column-gap: 12px; }
+.form-row > * { flex: 1 1 150px; min-width: 0; }
+.form-row .input { min-width: 0; }
+.form-error {
+  margin-bottom: var(--spacing-sm);
+  padding: 8px 12px;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius);
+  background-color: rgba(244,67,54,0.12);
+  color: #ff8a80;
+  font-size: 13px;
+}
 
 /* === UTILS === */
 .text-muted { color: var(--color-text-muted); }
